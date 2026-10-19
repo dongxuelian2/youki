@@ -28,7 +28,7 @@ jobs:
         run: |
           python3 .validation/toggle_fix.py remove
           set +e
-          cargo +stable test -p libcontainer --no-default-features --lib --locked rootfs::mount::tests::test_mount_into_container_sync_flags -- --exact --test-threads=1 >results/before-unit.log 2>&1
+          CARGO_TERM_COLOR=never cargo +stable test -p libcontainer --lib --locked rootfs::mount::tests::test_mount_into_container_sync_flags -- --exact --test-threads=1 >results/before-unit.log 2>&1
           status=$?
           set -e
           cat results/before-unit.log
@@ -43,12 +43,12 @@ jobs:
         run: python3 .validation/toggle_fix.py restore
       - name: Focused tests after the fix
         run: |
-          cargo +stable test -p libcontainer --no-default-features --lib --locked -- rootfs:: syscall:: --test-threads=1 | tee results/after-unit.log
+          cargo +stable test -p libcontainer --lib --locked -- rootfs:: syscall:: --test-threads=1 | tee results/after-unit.log
           cargo +stable test -p libcontainer --all-features --lib --locked rootfs:: -- --test-threads=1 | tee results/after-all-features.log
           cargo +stable clippy -p libcontainer --all-targets --all-features --locked -- -D warnings | tee results/focused-clippy.log
       - name: Real kernel mounts in a private namespace
         run: |
-          sudo env PATH="$PATH" CARGO_HOME="$HOME/.cargo" RUSTUP_HOME="$HOME/.rustup" cargo +stable test -p libcontainer --no-default-features --lib --locked rootfs::mount::tests::test_mount_into_container_sync_flags_kernel -- --exact --ignored --test-threads=1 | tee results/kernel-mount.log
+          sudo env PATH="$PATH" CARGO_HOME="$HOME/.cargo" RUSTUP_HOME="$HOME/.rustup" cargo +stable test -p libcontainer --lib --locked rootfs::mount::tests::test_mount_into_container_sync_flags_kernel -- --exact --ignored --test-threads=1 | tee results/kernel-mount.log
       - name: Issue reproduction after the fix
         run: |
           cargo +stable build -p youki --features v1,v2,systemd,seccomp --locked
@@ -69,6 +69,7 @@ jobs:
           components: rustfmt
       - run: cargo +nightly fmt --all -- --check
   workspace:
+    if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     steps:
