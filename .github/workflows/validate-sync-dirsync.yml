@@ -45,7 +45,6 @@ jobs:
         run: |
           cargo +stable test -p libcontainer --lib --locked -- rootfs:: syscall:: --test-threads=1 | tee results/after-unit.log
           cargo +stable test -p libcontainer --all-features --lib --locked rootfs:: -- --test-threads=1 | tee results/after-all-features.log
-          cargo +stable clippy -p libcontainer --all-targets --all-features --locked -- -D warnings | tee results/focused-clippy.log
       - name: Real kernel mounts in a private namespace
         run: |
           sudo env PATH="$PATH" CARGO_HOME="$HOME/.cargo" RUSTUP_HOME="$HOME/.rustup" cargo +stable test -p libcontainer --lib --locked rootfs::mount::tests::test_mount_into_container_sync_flags_kernel -- --exact --ignored --test-threads=1 | tee results/kernel-mount.log
@@ -54,6 +53,17 @@ jobs:
           cargo +stable build -p youki --features v1,v2,systemd,seccomp --locked
           sudo unshare --mount --propagation private --fork python3 .validation/repro.py --runtime target/debug/youki --phase after | tee results/after-oci.log
           git diff --check
+      - name: Stable clippy (record new-toolchain lint failures separately)
+        if: always()
+        run: cargo +stable clippy -p libcontainer --all-targets --all-features --locked -- -D warnings 2>&1 | tee results/focused-clippy.log
+      - name: Clippy with the repository's pinned toolchain
+        if: always()
+        run: |
+          rustup toolchain install 1.96.0 --profile minimal --component clippy
+          cargo +1.96.0 clippy -p libcontainer --all-targets --all-features --locked -- -D warnings 2>&1 | tee results/pinned-clippy.log
+      - name: Make disposable fixture evidence readable
+        if: always()
+        run: sudo chown -R "$(id -u):$(id -g)" results
       - uses: actions/upload-artifact@v4
         if: always()
         with:
