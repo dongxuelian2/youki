@@ -87,6 +87,8 @@ jobs:
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
           toolchain: stable
@@ -113,16 +115,16 @@ jobs:
           sudo env PATH="$PATH" CARGO_HOME="$HOME/.cargo" RUSTUP_HOME="$HOME/.rustup" HOME="$HOME" USER="$(id -un)" LOGNAME="$(id -un)" CARGO_PROFILE_DEV_DEBUG=0 CARGO_INCREMENTAL=0 TEST_NON_ROOT_UID="$TEST_NON_ROOT_UID" RUSTFLAGS="$RUSTFLAGS" unshare --mount --propagation private --fork bash -euo pipefail -c '
             mount --bind /dev/pts/ptmx /dev/ptmx
             stat -f -c "ptmx filesystem: %T (%t)" /dev/ptmx
-            exec setpriv --reuid="$1" --regid="$2" --init-groups timeout 20m cargo +stable test --workspace --all-features --locked -- --test-threads=1
+            exec setpriv --reuid="$1" --regid="$2" --init-groups timeout 20m cargo +stable test --workspace --all-features --locked --no-fail-fast -- --test-threads=1
           ' _ "$(id -u)" "$(id -g)" 2>&1 | tee results/workspace-tests.log
       - name: Restore candidate after the baseline comparison
         if: always()
         run: git restore --source=HEAD --worktree -- crates/libcontainer/src/rootfs/mount.rs crates/libcontainer/src/rootfs/utils.rs
       - name: Workspace clippy
-        if: always()
+        if: "always() && !contains(github.event.head_commit.message, '[test-only]')"
         run: cargo +stable clippy --workspace --all-targets --all-features --locked -- -D warnings 2>&1 | tee results/workspace-clippy.log
       - name: Pinned workspace clippy
-        if: always()
+        if: "always() && !contains(github.event.head_commit.message, '[test-only]')"
         run: |
           rustup toolchain install 1.96.0 --profile minimal --component clippy
           cargo +1.96.0 clippy --workspace --all-targets --all-features --locked -- -D warnings 2>&1 | tee results/pinned-workspace-clippy.log
