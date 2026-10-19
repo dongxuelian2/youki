@@ -1,0 +1,93 @@
+name: Validate sync and dirsync fix
+on:
+  push:
+    branches: [codex/validate-sync-dirsync]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  focused:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: stable
+          components: clippy
+      - name: Linux dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y pkg-config libsystemd-dev build-essential libelf-dev libseccomp-dev libclang-dev libssl-dev busybox-static
+          mkdir -p results
+          uname -a | tee results/kernel.txt
+      - name: Expose the regression on upstream production code
+        run: |
+          python3 .validation/toggle_fix.py remove
+          set +e
+          cargo +stable test -p libcontainer --no-default-features --lib --locked rootfs::mount::tests::test_mount_into_container_sync_flags -- --exact --test-threads=1 >results/before-unit.log 2>&1
+          status=$?
+          set -e
+          cat results/before-unit.log
+          test "$status" -ne 0
+          grep -F 'test result: FAILED. 0 passed; 1 failed' results/before-unit.log
+      - name: Issue reproduction before the fix
+        run: |
+          cargo +stable build -p youki --features v1,v2,systemd,seccomp --locked
+          sudo unshare --mount --propagation private --fork python3 .validation/repro.py --runtime target/debug/youki --phase before | tee results/before-oci.log
+      - name: Restore the fix
+        if: always()
+        run: python3 .validation/toggle_fix.py restore
+      - name: Focused tests after the fix
+        run: |
+          cargo +stable test -p libcontainer --no-default-features --lib --locked -- rootfs:: syscall:: --test-threads=1 | tee results/after-unit.log
+          cargo +stable test -p libcontainer --all-features --lib --locked rootfs:: -- --test-threads=1 | tee results/after-all-features.log
+          cargo +stable clippy -p libcontainer --all-targets --all-features --locked -- -D warnings | tee results/focused-clippy.log
+      - name: Real kernel mounts in a private namespace
+        run: |
+          sudo env PATH="$PATH" CARGO_HOME="$HOME/.cargo" RUSTUP_HOME="$HOME/.rustup" cargo +stable test -p libcontainer --no-default-features --lib --locked rootfs::mount::tests::test_mount_into_container_sync_flags_kernel -- --exact --ignored --test-threads=1 | tee results/kernel-mount.log
+      - name: Issue reproduction after the fix
+        run: |
+          cargo +stable build -p youki --features v1,v2,systemd,seccomp --locked
+          sudo unshare --mount --propagation private --fork python3 .validation/repro.py --runtime target/debug/youki --phase after | tee results/after-oci.log
+          git diff --check
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: focused-evidence
+          path: results
+  format:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: nightly
+          components: rustfmt
+      - run: cargo +nightly fmt --all -- --check
+  workspace:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: stable
+          components: clippy
+      - name: Linux dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y pkg-config libsystemd-dev build-essential libelf-dev libseccomp-dev libclang-dev libssl-dev
+          sudo useradd -m -d /tmp/testuser testuser
+          echo "TEST_NON_ROOT_UID=$(id -u testuser)" >> "$GITHUB_ENV"
+          mkdir -p results
+      - name: Workspace tests
+        run: cargo +stable test --workspace --all-features --locked 2>&1 | tee results/workspace-tests.log
+      - name: Workspace clippy
+        if: always()
+        run: cargo +stable clippy --workspace --all-targets --all-features --locked -- -D warnings 2>&1 | tee results/workspace-clippy.log
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: workspace-evidence
+          path: results
