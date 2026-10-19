@@ -113,8 +113,12 @@ jobs:
           grep -F 'ptmx handle is not on a real devpts mount' results/baseline-tty.log
           git restore --source=HEAD --worktree -- crates/libcontainer/src/rootfs/mount.rs crates/libcontainer/src/rootfs/utils.rs
           sudo env PATH="$PATH" CARGO_HOME="$HOME/.cargo" RUSTUP_HOME="$HOME/.rustup" HOME="$HOME" USER="$(id -un)" LOGNAME="$(id -un)" CARGO_PROFILE_DEV_DEBUG=0 CARGO_INCREMENTAL=0 TEST_NON_ROOT_UID="$TEST_NON_ROOT_UID" RUSTFLAGS="$RUSTFLAGS" unshare --mount --propagation private --fork bash -euo pipefail -c '
+            pty_root=$(mktemp -d /tmp/youki-pts.XXXXXX)
+            mount -t devpts -o newinstance,ptmxmode=0666,mode=0620,gid=5 devpts "$pty_root"
+            mount --bind "$pty_root" /dev/pts
             mount --bind /dev/pts/ptmx /dev/ptmx
             stat -f -c "ptmx filesystem: %T (%t)" /dev/ptmx
+            stat -c "ptmx permissions: %a" /dev/ptmx
             exec setpriv --reuid="$1" --regid="$2" --init-groups timeout 20m cargo +stable test --workspace --all-features --locked --no-fail-fast -- --test-threads=1
           ' _ "$(id -u)" "$(id -g)" 2>&1 | tee results/workspace-tests.log
       - name: Restore candidate after the baseline comparison
