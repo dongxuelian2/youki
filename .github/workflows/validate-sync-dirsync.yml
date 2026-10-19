@@ -10,6 +10,7 @@ defaults:
     shell: bash
 jobs:
   focused:
+    if: "!contains(github.event.head_commit.message, '[serial-only]')"
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
@@ -68,7 +69,9 @@ jobs:
         if: always()
         with:
           name: focused-evidence
-          path: results
+          path: |
+            results/*.log
+            results/*.txt
   format:
     runs-on: ubuntu-24.04
     steps:
@@ -79,7 +82,7 @@ jobs:
           components: rustfmt
       - run: cargo +nightly fmt --all -- --check
   workspace:
-    if: github.event_name == 'workflow_dispatch'
+    if: "github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[serial-only]')"
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     steps:
@@ -94,12 +97,18 @@ jobs:
           sudo apt-get install -y pkg-config libsystemd-dev build-essential libelf-dev libseccomp-dev libclang-dev libssl-dev
           sudo useradd -m -d /tmp/testuser testuser
           echo "TEST_NON_ROOT_UID=$(id -u testuser)" >> "$GITHUB_ENV"
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
           mkdir -p results
       - name: Workspace tests
-        run: cargo +stable test --workspace --all-features --locked 2>&1 | tee results/workspace-tests.log
+        run: timeout 20m cargo +stable test --workspace --all-features --locked -- --test-threads=1 2>&1 | tee results/workspace-tests.log
       - name: Workspace clippy
         if: always()
         run: cargo +stable clippy --workspace --all-targets --all-features --locked -- -D warnings 2>&1 | tee results/workspace-clippy.log
+      - name: Pinned workspace clippy
+        if: always()
+        run: |
+          rustup toolchain install 1.96.0 --profile minimal --component clippy
+          cargo +1.96.0 clippy --workspace --all-targets --all-features --locked -- -D warnings 2>&1 | tee results/pinned-workspace-clippy.log
       - uses: actions/upload-artifact@v4
         if: always()
         with:
